@@ -19,6 +19,10 @@ export default function Dashboard() {
     const [activeTab, setActiveTab] = useState('overview');
     const [viewingId, setViewingId] = useState(null);
     const [viewError, setViewError] = useState('');
+    const [consultantMessages, setConsultantMessages] = useState([]);
+    const [consultantInput, setConsultantInput] = useState('');
+    const [consultantSelectedDocId, setConsultantSelectedDocId] = useState('none');
+    const [consultantSending, setConsultantSending] = useState(false);
 
     useEffect(() => {
         listDocuments()
@@ -47,6 +51,53 @@ export default function Dashboard() {
             setViewingId(null);
         }
     };
+
+    const handleConsultantSend = (e) => {
+        e.preventDefault();
+        const trimmed = consultantInput.trim();
+        if (!trimmed) return;
+
+        const selectedDoc =
+            consultantSelectedDocId && consultantSelectedDocId !== 'none'
+                ? documents.find((d) => d.id === consultantSelectedDocId)
+                : null;
+
+        const timestamp = new Date().toISOString();
+
+        const userMessage = {
+            id: `${timestamp}-user`,
+            role: 'user',
+            text: trimmed,
+            docContext: selectedDoc
+                ? { id: selectedDoc.id, filename: selectedDoc.filename }
+                : null,
+            createdAt: timestamp,
+        };
+
+        setConsultantMessages((prev) => [...prev, userMessage]);
+        setConsultantInput('');
+        setConsultantSending(true);
+
+        setTimeout(() => {
+            const assistantText = selectedDoc
+                ? `Placeholder answer using "${selectedDoc.filename}" as context. In the full version, an AI legal assistant would read this document and explain clauses, risks, and negotiation angles.`
+                : 'Placeholder answer from your AI legal consultant. In the full version, this would contain a law-aware response tailored to your question.';
+
+            const assistantMessage = {
+                id: `${Date.now()}-assistant`,
+                role: 'assistant',
+                text: assistantText,
+                docContext: selectedDoc
+                    ? { id: selectedDoc.id, filename: selectedDoc.filename }
+                    : null,
+                createdAt: new Date().toISOString(),
+            };
+
+            setConsultantMessages((prev) => [...prev, assistantMessage]);
+            setConsultantSending(false);
+        }, 700);
+    };
+
     return (
         <Layout>
             <div className="w-full max-w-6xl mx-auto">
@@ -236,34 +287,114 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                {/* Consultant tab (placeholder) */}
+                {/* Consultant tab */}
                 {activeTab === 'consultant' && (
                     <div className="glass-panel rounded-2xl border border-[#604B42]/25 p-8">
-                        <h3 className="text-xl font-semibold text-[#17282E] mb-2">LegaLens consultant</h3>
+                        <h3 className="text-xl font-semibold text-[#17282E] mb-2">
+                            LegaLens consultant
+                        </h3>
                         <p className="text-sm text-[#604B42] mb-6 max-w-xl">
-                            Ask an AI legal assistant questions about clauses, trade‑offs, and negotiation angles based on your uploaded agreements.
+                            Chat with a placeholder AI legal assistant. Ask about clauses and
+                            trade‑offs, or ground the conversation in one of your uploaded
+                            documents.
                         </p>
-                        <div className="space-y-4">
-                            <div className="h-32 border border-dashed border-[#604B42]/30 rounded-xl bg-[#F5F0EC]/60 flex items-center justify-center px-4 text-center">
-                                <p className="text-sm text-[#604B42]">
-                                    Chat interface placeholder. This will become a conversation space with an AI consultant.
+
+                        <div className="flex flex-col md:flex-row gap-6 mb-6">
+                            <div className="flex-1 text-sm text-[#604B42]">
+                                <p>
+                                    This is a front‑end prototype. Messages stay on this page only and
+                                    are not sent to a real model yet, but the layout is ready for an AI
+                                    backend.
                                 </p>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="w-full md:w-72">
+                                <label className="block text-xs font-semibold text-[#604B42] mb-1">
+                                    Context document (optional)
+                                </label>
+                                <select
+                                    value={consultantSelectedDocId}
+                                    onChange={(e) => setConsultantSelectedDocId(e.target.value)}
+                                    className="w-full px-3 py-2 rounded-lg border border-[#604B42]/30 bg-[#F5F0EC] text-sm text-[#17282E] focus:outline-none focus:ring-2 focus:ring-[#17282E]/30"
+                                >
+                                    <option value="none">No document – general legal question</option>
+                                    {documents.map((doc) => (
+                                        <option key={doc.id} value={doc.id}>
+                                            {doc.filename}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="mt-1 text-[11px] text-[#604B42]/80">
+                                    In the full version, the consultant would read the selected file for
+                                    extra context.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-4">
+                            <div className="border border-[#604B42]/30 rounded-xl bg-[#F5F0EC]/60 h-80 flex flex-col overflow-hidden">
+                                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+                                    {consultantMessages.length === 0 && (
+                                        <div className="text-xs text-[#604B42] bg-white/70 border border-dashed border-[#604B42]/30 rounded-lg p-3">
+                                            <p className="font-medium mb-1">Try asking:</p>
+                                            <ul className="list-disc list-inside space-y-1">
+                                                <li>
+                                                    &quot;Is there anything risky about the non‑compete in my latest
+                                                    employment agreement?&quot;
+                                                </li>
+                                                <li>
+                                                    &quot;What should I look out for in limitation‑of‑liability clauses?&quot;
+                                                </li>
+                                                <li>
+                                                    Select a document above, then ask how fair a specific clause is.
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {consultantMessages.map((msg) => (
+                                        <div
+                                            key={msg.id}
+                                            className={`flex ${
+                                                msg.role === 'user' ? 'justify-end' : 'justify-start'
+                                            }`}
+                                        >
+                                            <div
+                                                className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs ${
+                                                    msg.role === 'user'
+                                                        ? 'bg-[#17282E] text-[#EBE6E3]'
+                                                        : 'bg-white text-[#17282E] border border-[#604B42]/25'
+                                                }`}
+                                            >
+                                                {msg.docContext && (
+                                                    <p className="text-[10px] mb-1 opacity-70">
+                                                        Context: {msg.docContext.filename}
+                                                    </p>
+                                                )}
+                                                <p>{msg.text}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <form onSubmit={handleConsultantSend} className="flex gap-3">
                                 <div className="flex-1">
                                     <input
                                         type="text"
-                                        placeholder="Type a question about your agreement…"
+                                        value={consultantInput}
+                                        onChange={(e) => setConsultantInput(e.target.value)}
+                                        placeholder="Ask about a clause, law, or negotiation angle…"
                                         className="w-full px-3 py-2 rounded-lg border border-[#604B42]/30 bg-[#F5F0EC] text-sm text-[#17282E] focus:outline-none focus:ring-2 focus:ring-[#17282E]/30"
                                     />
                                 </div>
                                 <button
-                                    type="button"
-                                    className="px-4 py-2 rounded-full text-sm font-medium bg-[#17282E] text-[#EBE6E3] hover:bg-[#17282E] transition-colors"
+                                    type="submit"
+                                    disabled={consultantSending || !consultantInput.trim()}
+                                    className="px-4 py-2 rounded-full text-sm font-medium bg-[#17282E] text-[#EBE6E3] hover:bg-[#17282E] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                 >
-                                    Send
+                                    {consultantSending ? 'Thinking…' : 'Send'}
                                 </button>
-                            </div>
+                            </form>
                         </div>
                     </div>
                 )}
