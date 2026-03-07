@@ -58,6 +58,11 @@ CANLII_SEARCH_TERMS = {
     "Limitation of Liability": "limitation liability clause enforceability",
     "Warranty Disclaimer": "warranty disclaimer consumer protection",
     "Force Majeure": "force majeure frustrated contract Canada",
+    "Entry / Access Rights": "landlord entry tenant privacy quiet enjoyment residential tenancy",
+    "Repair / Maintenance": "tenant repair obligation landlord maintenance residential tenancy",
+    "Security Deposit": "security deposit refund residential tenancy act",
+    "Fees / Penalties": "early termination penalty fee residential tenancy",
+    "Lease Renewal / Extension": "automatic lease renewal residential tenancy",
 }
 
 

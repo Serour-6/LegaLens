@@ -17,13 +17,17 @@ Output ONLY a valid JSON array. Each object must have exactly these fields:
 - "type": one of — Liability Waiver, IP Assignment, Non-Compete, Arbitration,
   Auto-Renewal, Data & Privacy, Termination for Cause, Indemnification,
   Force Majeure, Governing Law, Amendment / Unilateral Change, Photo & Media Rights,
-  Confidentiality / NDA, Payment Terms, Limitation of Liability, Warranty Disclaimer
+  Confidentiality / NDA, Payment Terms, Limitation of Liability, Warranty Disclaimer,
+  Entry / Access Rights, Repair / Maintenance, Security Deposit, Fees / Penalties,
+  Lease Renewal / Extension, Other
 - "raw_text": EXACT verbatim text from the document (never paraphrase or shorten)
 - "location": where it appears e.g. "Section 3", "Article IV", "Paragraph 2"
 
 Rules:
-- Extract ALL instances. Be thorough.
+- Extract EVERY SINGLE clause. Do NOT skip any. Be exhaustive.
+- If a clause does not fit a specific type, use "Other".
 - If a clause type appears multiple times, extract each one separately.
+- It is CRITICAL that you do not miss any clause. Count them before responding.
 - No explanation, no markdown fences. Raw JSON array only.
 
 Document: {document_name} ({document_type})
