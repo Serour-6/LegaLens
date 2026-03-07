@@ -156,6 +156,37 @@ async def backboard_get_history(thread_id: str) -> List[Dict[str, Any]]:
         return []
 
 
+# Default context when no LAW_CONTEXT is stored yet (e.g. before analyst runs).
+# All agents use the global Canadian law thread; this fallback keeps them aligned.
+DEFAULT_CANADIAN_LAW_CONTEXT = (
+    "Apply Canadian federal and provincial contract law, including PIPEDA, "
+    "Canada Labour Code, consumer protection legislation, and common law principles where relevant."
+)
+
+
+async def backboard_get_global_law_context(thread_id: str) -> str:
+    """
+    Return Canadian law context for agent prompts. Used by all agents so they share
+    the same global thread context (from BACKBOARD_LAW_THREAD_ID or any LAW_CONTEXT in Backboard).
+    """
+    if thread_id:
+        try:
+            history = await backboard_get_history(thread_id)
+            for msg in reversed(history):
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.startswith("LAW_CONTEXT:"):
+                    return content[len("LAW_CONTEXT:") :].lstrip()
+        except Exception as e:
+            print(f"Backboard get global law context (thread) failed (non-fatal): {e}")
+    try:
+        global_ctx = await backboard_find_global_law_context()
+        if global_ctx:
+            return global_ctx
+    except Exception as e:
+        print(f"Backboard get global law context (global scan) failed (non-fatal): {e}")
+    return DEFAULT_CANADIAN_LAW_CONTEXT
+
+
 async def backboard_find_global_law_context() -> str | None:
     """
     Scan Backboard for any LAW_CONTEXT message across threads.

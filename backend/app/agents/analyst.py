@@ -86,38 +86,14 @@ async def scrape_canlii(clause_type: str) -> str:
     return ""
 
 
-def _load_law_context_from_disk() -> str | None:
-    """Load persisted Canadian law context if it exists (scrape once, use forever)."""
-    if not _LAW_CACHE_FILE.is_file():
-        return None
-    try:
-        return _LAW_CACHE_FILE.read_text(encoding="utf-8").strip()
-    except Exception as e:
-        print(f"  -> Law cache file read failed (non-fatal): {e}")
-        return None
-
-
-def _save_law_context_to_disk(context: str) -> None:
-    """Persist law context so we never need to scrape again unless the file is removed."""
-    try:
-        _LAW_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _LAW_CACHE_FILE.write_text(context, encoding="utf-8")
-        print(f"  -> Law context saved to {_LAW_CACHE_FILE} (reused for all future runs).")
-    except Exception as e:
-        print(f"  -> Law cache file write failed (non-fatal): {e}")
-
-
 async def get_live_canadian_law(
     clauses: List[Dict[str, Any]],
     thread_id: str,
 ) -> str:
     """
-    Canadian law references for clause analysis.
-
-    Behavior:
-    - Scrape CanLII at most once ever (per Backboard project).
-    - Persist that context into Backboard as LAW_CONTEXT so all future
-      runs and all users can reuse it by scanning threads.
+    Canadian law context for analysis (same global thread as other agents).
+    Reads from current thread or backboard_find_global_law_context; if missing,
+    scrapes CanLII and persists LAW_CONTEXT to Backboard for all agents to use.
     """
     global _GLOBAL_LAW_CONTEXT
 

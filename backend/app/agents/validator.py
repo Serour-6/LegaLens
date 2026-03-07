@@ -2,11 +2,15 @@ import json
 import re
 from typing import Dict, Any
 
+from .backboard import backboard_get_global_law_context
 from .llm import extractor_llm, call_llm
 
 
-VALIDATOR_PROMPT = """You are a document type classifier. Determine whether the text
-below is a legal contract or legal document worth analyzing for clauses and obligations.
+VALIDATOR_PROMPT = """You are a document type classifier for Canadian legal documents.
+Determine whether the text below is a legal contract or legal document worth analyzing.
+
+Canadian law context (use for document categories and suggested_type):
+{canadian_law}
 
 Respond with ONLY a JSON object with exactly these fields:
 - "is_legal_document": true or false
@@ -27,10 +31,14 @@ Text to classify (first 3000 characters):
 {document_text}"""
 
 
-async def run_validator(document_text: str) -> Dict[str, Any]:
+async def run_validator(document_text: str, thread_id: str = "") -> Dict[str, Any]:
     """Check if document is actually a legal contract before running the pipeline."""
     print("Agent 0 (Validator): Checking document relevance...")
-    prompt = VALIDATOR_PROMPT.format(document_text=document_text[:3000])
+    canadian_law = await backboard_get_global_law_context(thread_id)
+    prompt = VALIDATOR_PROMPT.format(
+        canadian_law=canadian_law,
+        document_text=document_text[:3000],
+    )
     try:
         raw = await call_llm(extractor_llm(), prompt)
         raw = re.sub(r"^[`]{3}(?:json)?\s*|\s*[`]{3}$", "", raw)

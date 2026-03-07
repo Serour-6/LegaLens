@@ -56,6 +56,105 @@ export async function getDocumentUrl(path: string) {
   return data as { url: string };
 }
 
+export type AnalysisProgress = {
+  event: "progress";
+  agent: string;
+  message: string;
+};
+
+export type AnalysisRejected = {
+  event: "rejected";
+  reason: string;
+  document_category?: string;
+  suggestion?: string;
+};
+
+export type AnalysisResult = {
+  session_id: string;
+  thread_id: string;
+  document_name: string;
+  document_type: string;
+  overall_risk_score: string;
+  executive_summary: string;
+  top_risks: string[];
+  bottom_line: string;
+  analyzed_clauses: unknown[];
+  clause_count: number;
+};
+
+export type AnalysisComplete = {
+  event: "complete";
+  result: AnalysisResult;
+};
+
+export type AnalysisError = {
+  event: "error";
+  message: string;
+};
+
+export type AnalysisStreamEvent =
+  | AnalysisProgress
+  | AnalysisRejected
+  | AnalysisComplete
+  | AnalysisError;
+
+/**
+ * Run the full pipeline (extract → analyze → summarize) for a stored document.
+ * Consumes SSE stream; onEvent is called for each event. Resolves with result on complete.
+ */
+export async function analyzeStoredDocument(
+  path: string,
+  onEvent: (ev: AnalysisStreamEvent) => void
+): Promise<AnalysisResult> {
+  const token = _getAccessToken ? await _getAccessToken() : null;
+  const res = await fetch(`${API_BASE}/documents/analyze`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || "Failed to start analysis");
+  }
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: AnalysisResult | null = null;
+  let rejected: AnalysisRejected | null = null;
+  let streamError: string | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const data = JSON.parse(line.slice(6)) as AnalysisStreamEvent;
+          onEvent(data);
+          if (data.event === "complete") {
+            result = data.result;
+          } else if (data.event === "rejected") {
+            rejected = data;
+          } else if (data.event === "error") {
+            streamError = data.message;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  if (streamError) throw new Error(streamError);
+  if (rejected) throw new Error(rejected.reason || "Document was rejected");
+  if (!result) throw new Error("Analysis did not complete");
+  return result;
+}
+
 type VoiceSessionResponse = {
   agent_id: string;
   webrtc_token: string;

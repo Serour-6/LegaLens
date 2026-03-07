@@ -2,11 +2,14 @@ import json
 import re
 from typing import Any, Dict, List
 
-from .backboard import backboard_get_history, backboard_save
+from .backboard import backboard_get_history, backboard_save, backboard_get_global_law_context
 from .llm import summarizer_llm, call_llm
 
 
 SUMMARIZER_PROMPT = """You are a legal document summarizer writing for non-lawyers in Canada.
+
+Canadian law context (use for executive summary and risk wording):
+{canadian_law}
 
 Document: "{document_name}" ({document_type})
 Clauses: {total} total — HIGH: {high}, MEDIUM: {med}, LOW: {low}
@@ -29,9 +32,12 @@ Be direct. Reference Canadian law where relevant. Raw JSON only."""
 
 QA_PROMPT = """You are a Canadian legal document assistant.
 Answer questions using ONLY the document excerpts provided.
-Reference relevant Canadian law where applicable (PIPEDA, Canada Labour Code, etc.).
-Plain English, 2-4 sentences. If the document doesn't address it, say so clearly.
-Never invent information.
+
+Canadian law context:
+{canadian_law}
+
+Reference relevant Canadian law where applicable. Plain English, 2-4 sentences.
+If the document doesn't address it, say so clearly. Never invent information.
 
 Document: {document_name}
 
@@ -60,7 +66,9 @@ async def run_summarizer(
             "overall_risk_score": "MEDIUM",
         }
 
+    canadian_law = await backboard_get_global_law_context(thread_id)
     prompt = SUMMARIZER_PROMPT.format(
+        canadian_law=canadian_law,
         document_name=document_name,
         document_type=document_type,
         total=len(analyzed_clauses),
@@ -111,7 +119,9 @@ async def run_qa(
             + "\n\n"
         )
 
+    canadian_law = await backboard_get_global_law_context(thread_id)
     prompt = QA_PROMPT.format(
+        canadian_law=canadian_law,
         document_name=document_name,
         history=history_str,
         chunks="\n\n---\n\n".join(chunks)[:8000],

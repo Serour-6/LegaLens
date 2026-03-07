@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { DocumentTextIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { Conversation } from '@elevenlabs/client';
 import Layout from '../components/Layout';
-import { listDocuments, getDocumentUrl, createVoiceSession, createBackboardThread, voiceThink } from '../api.ts';
+import { listDocuments, getDocumentUrl, analyzeStoredDocument, createVoiceSession, createBackboardThread, voiceThink } from '../api.ts';
 
 function formatBytes(bytes) {
     if (!bytes) return '—';
@@ -23,6 +23,10 @@ export default function Dashboard() {
     const [viewerDoc, setViewerDoc] = useState(null);
     const [viewerUrl, setViewerUrl] = useState('');
     const [viewerLoading, setViewerLoading] = useState(false);
+    const [analysisLoading, setAnalysisLoading] = useState(false);
+    const [analysisProgress, setAnalysisProgress] = useState('');
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [analysisError, setAnalysisError] = useState('');
     const [consultantMessages, setConsultantMessages] = useState([]);
     const [consultantInput, setConsultantInput] = useState('');
     const [consultantSelectedDocId, setConsultantSelectedDocId] = useState('none');
@@ -56,6 +60,9 @@ export default function Dashboard() {
         setViewError('');
         setViewingId(doc.id);
         setViewerLoading(true);
+        setAnalysisResult(null);
+        setAnalysisError('');
+        setAnalysisProgress('');
         try {
             const data = await getDocumentUrl(doc.bucket_path);
             if (!data.url) {
@@ -68,9 +75,28 @@ export default function Dashboard() {
             setViewerDoc(doc);
             setViewerUrl(data.url);
             setActiveTab('viewer');
+            setViewingId(null);
+            setViewerLoading(false);
+
+            // Run pipeline: extract → analyze → summarize
+            setAnalysisLoading(true);
+            setAnalysisProgress('Starting analysis…');
+            try {
+                const result = await analyzeStoredDocument(doc.bucket_path, (ev) => {
+                    if (ev.event === 'progress') setAnalysisProgress(ev.message || '');
+                    if (ev.event === 'complete') setAnalysisResult(ev.result);
+                });
+                setAnalysisResult(result);
+                setAnalysisError('');
+            } catch (err) {
+                setAnalysisError(err.message || 'Analysis failed');
+                setAnalysisResult(null);
+            } finally {
+                setAnalysisLoading(false);
+                setAnalysisProgress('');
+            }
         } catch (err) {
             setViewError(err.message || 'Failed to open document');
-        } finally {
             setViewingId(null);
             setViewerLoading(false);
         }
@@ -444,23 +470,42 @@ export default function Dashboard() {
                                             )}
                                         </div>
 
-                                        <div className="w-full lg:w-72 border border-dashed border-[#604B42]/40 bg-[#F5F0EC]/80 px-4 py-3 text-xs text-[#604B42] space-y-2">
+                                        <div className="w-full lg:w-72 border border-[#604B42]/30 bg-[#F5F0EC]/80 px-4 py-3 text-xs text-[#604B42] space-y-3">
                                             <p className="font-semibold text-[#17282E]">
-                                                Placeholder clause highlights
+                                                Analysis
                                             </p>
-                                            <p>
-                                                This side panel will later list risky or unusual clauses found
-                                                in the document, grouped by severity and category.
-                                            </p>
-                                            <ul className="list-disc list-inside space-y-1">
-                                                <li>Red: clearly predatory or one‑sided clauses</li>
-                                                <li>Amber: terms that deserve a closer look</li>
-                                                <li>Green: favorable protections worth keeping</li>
-                                            </ul>
-                                            <p className="text-[11px]">
-                                                For now, use this as a visual placeholder while you iterate on
-                                                the backend analysis pipeline.
-                                            </p>
+                                            {analysisLoading && (
+                                                <p className="text-[#604B42]">{analysisProgress || 'Running pipeline…'}</p>
+                                            )}
+                                            {analysisError && (
+                                                <p className="text-red-600">{analysisError}</p>
+                                            )}
+                                            {analysisResult && !analysisLoading && (
+                                                <div className="space-y-2">
+                                                    <p className="font-medium text-[#17282E]">{analysisResult.bottom_line}</p>
+                                                    <p className="text-[11px]">{analysisResult.executive_summary}</p>
+                                                    <p>
+                                                        <span className="font-medium">Risk: </span>
+                                                        <span className={analysisResult.overall_risk_score === 'HIGH' || analysisResult.overall_risk_score === 'CRITICAL' ? 'text-red-600' : analysisResult.overall_risk_score === 'MEDIUM' ? 'text-amber-600' : 'text-[#604B42]'}>
+                                                            {analysisResult.overall_risk_score}
+                                                        </span>
+                                                        {' · '}{analysisResult.clause_count} clauses
+                                                    </p>
+                                                    {analysisResult.top_risks?.length > 0 && (
+                                                        <div>
+                                                            <p className="font-medium text-[#17282E] mb-1">Top risks</p>
+                                                            <ul className="list-disc list-inside space-y-0.5">
+                                                                {analysisResult.top_risks.map((r, i) => (
+                                                                    <li key={i}>{r}</li>
+                                                                ))}
+                                                            </ul>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {!analysisResult && !analysisLoading && !analysisError && (
+                                                <p className="text-[11px]">Open a document with View to run the analysis pipeline.</p>
+                                            )}
                                         </div>
                                     </div>
                                 </>
