@@ -2,11 +2,14 @@ import json
 import re
 from typing import List, Dict, Any
 
-from .backboard import backboard_save
+from .backboard import backboard_save, backboard_get_global_law_context
 from .llm import extractor_llm, call_llm
 
 
 EXTRACTOR_PROMPT = """You are a legal clause extraction engine for Canadian contracts.
+
+Canadian law context (use for relevance and clause types):
+{canadian_law}
 
 Read the document below and find every legal clause worth examining.
 Output ONLY a valid JSON array. Each object must have exactly these fields:
@@ -36,7 +39,9 @@ async def run_extractor(
     thread_id: str,
 ) -> List[Dict[str, Any]]:
     print("Agent 1 (Extractor): Finding clauses...")
+    canadian_law = await backboard_get_global_law_context(thread_id)
     prompt = EXTRACTOR_PROMPT.format(
+        canadian_law=canadian_law,
         document_name=document_name,
         document_type=document_type,
         document_text=document_text[:50000],

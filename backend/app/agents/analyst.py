@@ -86,38 +86,14 @@ async def scrape_canlii(clause_type: str) -> str:
     return ""
 
 
-def _load_law_context_from_disk() -> str | None:
-    """Load persisted Canadian law context if it exists (scrape once, use forever)."""
-    if not _LAW_CACHE_FILE.is_file():
-        return None
-    try:
-        return _LAW_CACHE_FILE.read_text(encoding="utf-8").strip()
-    except Exception as e:
-        print(f"  -> Law cache file read failed (non-fatal): {e}")
-        return None
-
-
-def _save_law_context_to_disk(context: str) -> None:
-    """Persist law context so we never need to scrape again unless the file is removed."""
-    try:
-        _LAW_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _LAW_CACHE_FILE.write_text(context, encoding="utf-8")
-        print(f"  -> Law context saved to {_LAW_CACHE_FILE} (reused for all future runs).")
-    except Exception as e:
-        print(f"  -> Law cache file write failed (non-fatal): {e}")
-
-
 async def get_live_canadian_law(
     clauses: List[Dict[str, Any]],
     thread_id: str,
 ) -> str:
     """
-    Canadian law references for clause analysis.
-
-    Behavior:
-    - Scrape CanLII at most once ever (per Backboard project).
-    - Persist that context into Backboard as LAW_CONTEXT so all future
-      runs and all users can reuse it by scanning threads.
+    Canadian law context for analysis (same global thread as other agents).
+    Reads from current thread or backboard_find_global_law_context; if missing,
+    scrapes CanLII and persists LAW_CONTEXT to Backboard for all agents to use.
     """
     global _GLOBAL_LAW_CONTEXT
 
@@ -187,52 +163,45 @@ async def run_analyst(
     canadian_law_context = await get_live_canadian_law(clauses, thread_id)
 
     all_analyzed: List[Dict[str, Any]] = []
-    batch_size = 5
-
-    for i in range(0, len(clauses), batch_size):
-        batch = clauses[i : i + batch_size]
-        print(f"  -> Batch {i // batch_size + 1}/{(len(clauses) + batch_size - 1) // batch_size}")
-        prompt = ANALYST_PROMPT.format(
-            document_name=document_name,
-            document_type=document_type,
-            canadian_law=canadian_law_context,
-            clauses_json=json.dumps(batch, indent=2),
-        )
-        try:
-            raw = await call_llm(analyst_llm(), prompt)
-            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
-            required = [
-                "id",
-                "type",
-                "raw_text",
-                "location",
-                "severity",
-                "severity_reason",
-                "plain_english",
-                "canadian_law",
-                "baseline_comparison",
-                "negotiation_tip",
-            ]
-            for item in json.loads(raw):
-                if all(k in item for k in required):
-                    all_analyzed.append({k: item[k] for k in required})
-        except Exception as e:
-            print(f"  -> Batch error: {e}")
-            for clause in batch:
-                all_analyzed.append(
-                    {
-                        **clause,
-                        "severity": "UNKNOWN",
-                        "severity_reason": "Analysis failed for this clause.",
-                        "plain_english": "N/A",
-                        "canadian_law": "N/A",
-                        "baseline_comparison": "N/A",
-                        "negotiation_tip": "N/A",
-                    }
-                )
-
-        if i + batch_size < len(clauses):
-            await asyncio.sleep(2)
+    # Single analysis call over all clauses instead of batching.
+    prompt = ANALYST_PROMPT.format(
+        document_name=document_name,
+        document_type=document_type,
+        canadian_law=canadian_law_context,
+        clauses_json=json.dumps(clauses, indent=2),
+    )
+    try:
+        raw = await call_llm(analyst_llm(), prompt)
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        required = [
+            "id",
+            "type",
+            "raw_text",
+            "location",
+            "severity",
+            "severity_reason",
+            "plain_english",
+            "canadian_law",
+            "baseline_comparison",
+            "negotiation_tip",
+        ]
+        for item in json.loads(raw):
+            if all(k in item for k in required):
+                all_analyzed.append({k: item[k] for k in required})
+    except Exception as e:
+        print(f"  -> Analyst error: {e}")
+        for clause in clauses:
+            all_analyzed.append(
+                {
+                    **clause,
+                    "severity": "UNKNOWN",
+                    "severity_reason": "Analysis failed for this clause.",
+                    "plain_english": "N/A",
+                    "canadian_law": "N/A",
+                    "baseline_comparison": "N/A",
+                    "negotiation_tip": "N/A",
+                }
+            )
 
     all_analyzed.sort(
         key=lambda c: {"HIGH": 0, "MEDIUM": 1, "LOW": 2}.get(c.get("severity", ""), 3)
