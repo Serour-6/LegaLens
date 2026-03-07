@@ -33,8 +33,10 @@ Document: {document_name} ({document_type})
 
 
 def _compute_line_and_char_span(
-    document_text: str, snippet: str
-) -> Dict[str, int] | None:
+    document_text: str,
+    snippet: str,
+    page_map: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any] | None:
     """
     Best-effort mapping of a clause's raw_text back to the original
     extracted document text so the frontend can highlight it.
@@ -42,6 +44,7 @@ def _compute_line_and_char_span(
     Returns a dict with:
     - line_start / line_end: 1-based line numbers within document_text
     - char_start / char_end: 0-based character offsets within document_text
+    - page_start / page_end:  1-based PDF page numbers (when page_map is provided)
     """
     if not snippet:
         return None
@@ -54,12 +57,27 @@ def _compute_line_and_char_span(
     line_start = document_text.count("\n", 0, char_start) + 1
     line_end = document_text.count("\n", 0, char_end) + 1
 
-    return {
+    result: Dict[str, Any] = {
         "line_start": line_start,
         "line_end": line_end,
         "char_start": char_start,
         "char_end": char_end,
     }
+
+    if page_map:
+        for entry in page_map:
+            if entry["char_start"] <= char_start < entry["char_end"]:
+                result["page_start"] = entry["page"]
+                break
+        for entry in page_map:
+            if entry["char_start"] < char_end <= entry["char_end"]:
+                result["page_end"] = entry["page"]
+                break
+        # Fallback: if char_end lands exactly on a boundary, use last page
+        if "page_end" not in result and "page_start" in result:
+            result["page_end"] = result["page_start"]
+
+    return result
 
 
 async def run_extractor(
@@ -67,6 +85,7 @@ async def run_extractor(
     document_name: str,
     document_type: str,
     thread_id: str,
+    page_map: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     print("Agent 1 (Extractor): Finding clauses...")
     canadian_law = await backboard_get_global_law_context(thread_id)
@@ -90,7 +109,7 @@ async def run_extractor(
                 "raw_text": c["raw_text"],
                 "location": c["location"],
             }
-            span = _compute_line_and_char_span(document_text, clause["raw_text"])
+            span = _compute_line_and_char_span(document_text, clause["raw_text"], page_map)
             if span:
                 clause.update(span)
             clauses.append(clause)

@@ -197,7 +197,7 @@ async def run_analyst(
             # frontend can highlight issues directly on the original PDF.
             original = clause_index.get(merged["id"])
             if isinstance(original, dict):
-                for extra_key in ("line_start", "line_end", "char_start", "char_end"):
+                for extra_key in ("line_start", "line_end", "char_start", "char_end", "page_start", "page_end"):
                     if extra_key in original and extra_key not in merged:
                         merged[extra_key] = original[extra_key]
 
