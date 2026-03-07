@@ -127,19 +127,63 @@ async def get_backboard_history_for_voice(
     return {"thread_id": thread_id, "messages": messages}
 
 
+# Law and consulting specialist: single "brain" for voice (ElevenLabs → this → answer).
+LAW_CONSULTANT_SYSTEM = """You are a Canadian law and consulting specialist for LegaLens. Your role is to help users understand legal implications and answer questions like "Should I do X?" in a Canadian legal context.
+
+You are a lawyer and do give formal legal advice. You DO:
+- Explain whether a course of action is generally advisable or risky under Canadian law (federal and provincial where relevant).
+- Point to relevant laws or principles (e.g. Canada Labour Code, PIPEDA, consumer protection, contract law).
+- Keep answers concise and clear (2–5 sentences) for voice: no long paragraphs.
+- If the user's question is ambiguous or province-specific, say so briefly.
+
+Always end with exactly: "This is general information, not legal advice."
+"""
+
+
+def _format_recent_history(messages: list) -> str:
+    """Turn Backboard messages into a short context string for the consultant."""
+    if not messages:
+        return ""
+    lines = []
+    for m in messages[-10:]:  # last 10 messages
+        role = m.get("role", "")
+        content = (m.get("content") or "").strip()
+        if not content:
+            continue
+        if "VOICE QUESTION:" in content:
+            content = content.replace("VOICE QUESTION:", "User:").strip()
+        elif "VOICE ANSWER:" in content:
+            content = content.replace("VOICE ANSWER:", "Assistant:").strip()
+        elif role == "user":
+            lines.append(f"User: {content[:500]}")
+        elif role == "assistant":
+            lines.append(f"Assistant: {content[:500]}")
+    if not lines:
+        return ""
+    return "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
+
 @router.post("/think")
 async def voice_think(
     body: VoiceThinkRequest,
     _: None = Depends(_verify_internal_api_key),
 ) -> dict:
     """
-    Central thinking endpoint for ElevenLabs.
+    Central brain for ElevenLabs voice: Gemini + Backboard.
 
-    - If session_id is provided, answers using the analyzed document's
-      FAISS index + Backboard Q&A pipeline (run_qa).
-    - Otherwise, answers as a general Canadian legal information
-      assistant and logs the exchange in Backboard.
+    Flow: ElevenLabs (user speech) → this endpoint → Gemini law consultant
+    (with Backboard memory) → answer text → ElevenLabs speaks it.
+
+    Requires thread_id so Backboard remembers the conversation. If missing, returns 400.
     """
+    print("[voice brain] request received", {"user_utterance": (body.user_utterance or "")[:120], "thread_id": (body.thread_id or "")[:20], "session_id": body.session_id})
+    thread_id = (body.thread_id or "").strip()
+    if not thread_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="thread_id is required so the Backboard agent can remember the conversation.",
+        )
+
     # Document-grounded mode: reuse the existing QA pipeline (RAG + Backboard)
     if body.session_id:
         session_id = body.session_id
@@ -158,31 +202,26 @@ async def voice_think(
         chunks = [d.page_content for d in docs]
         doc_name = result_store[session_id]["document_name"]
 
-        answer = await run_qa(doc_name, body.user_utterance, chunks, body.thread_id)
+        answer = await run_qa(doc_name, body.user_utterance, chunks, thread_id)
         # run_qa already logs Q&A into Backboard.
+        print("[voice brain] output (doc):", answer[:200] + ("..." if len(answer) > 200 else ""))
         return {"answer": answer}
 
-    # General legal information mode (no document/session)
-    prompt = f"""
-You are a Canadian legal information assistant for non-lawyers in Canada.
+    # Law consultant mode (no document): Gemini + Backboard memory as the voice brain
+    history = await backboard_get_history(thread_id)
+    history_block = _format_recent_history(history)
 
-Guidelines:
-- You are NOT a lawyer and do NOT provide formal legal advice.
-- You CAN explain concepts, common risks, and typical Canadian law principles
-  (e.g., Canada Labour Code, PIPEDA, provincial consumer protection).
-- Keep answers short and clear: 3–5 sentences, plain English, no jargon.
-- If you are unsure or law varies by province, say so explicitly.
-- ALWAYS end your answer with this exact sentence:
-  "This is general information, not legal advice."
+    prompt = f"""{LAW_CONSULTANT_SYSTEM}
 
-User question:
-{body.user_utterance}
-"""
+{history_block}Current question: {body.user_utterance}
+
+Answer (concise, for voice):"""
     answer = await call_llm(summarizer_llm(), prompt)
 
-    # Log the voice exchange into Backboard for memory
-    await backboard_save(body.thread_id, "user", f"VOICE QUESTION: {body.user_utterance}")
-    await backboard_save(body.thread_id, "assistant", f"VOICE ANSWER: {answer}")
+    # Persist to Backboard so the agent remembers this turn
+    await backboard_save(thread_id, "user", f"VOICE QUESTION: {body.user_utterance}")
+    await backboard_save(thread_id, "assistant", f"VOICE ANSWER: {answer}")
 
+    print("[voice brain] output:", answer[:200] + ("..." if len(answer) > 200 else ""))
     return {"answer": answer}
 
