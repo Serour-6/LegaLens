@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { DocumentTextIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { Conversation } from '@elevenlabs/client';
 import Layout from '../components/Layout';
-import { listDocuments, getDocumentUrl, createVoiceSession } from '../api.ts';
+import { listDocuments, getDocumentUrl, createVoiceSession, createBackboardThread, voiceThink } from '../api.ts';
 
 function formatBytes(bytes) {
     if (!bytes) return '—';
@@ -31,6 +31,7 @@ export default function Dashboard() {
     const [voiceStatus, setVoiceStatus] = useState('idle');
     const [voiceError, setVoiceError] = useState('');
     const voiceConversationRef = useRef(null);
+    const voiceBackboardThreadIdRef = useRef(null);
 
     useEffect(() => {
         listDocuments()
@@ -142,8 +143,19 @@ export default function Dashboard() {
             setVoiceError('');
             setVoiceStatus('connecting');
 
-            const session = await createVoiceSession();
+            // Create Backboard thread first so the agent has memory; required for /think.
+            let backboard;
+            try {
+                backboard = await createBackboardThread('LegaLens Voice Consultant');
+            } catch (err) {
+                setVoiceError('Could not create conversation memory. Please try again.');
+                setVoiceStatus('idle');
+                return;
+            }
+            voiceBackboardThreadIdRef.current = backboard.thread_id;
 
+            const session = await createVoiceSession();
+            const threadIdRef = voiceBackboardThreadIdRef;
             const conversation = await Conversation.startSession({
                 agentId: session.agent_id,
                 conversationToken: session.webrtc_token,
@@ -162,6 +174,30 @@ export default function Dashboard() {
                     setVoiceStatus('error');
                     voiceConversationRef.current = null;
                     setAssistantSpeaking(false);
+                },
+                // Backboard + Gemini thinking: agent must have a tool "get_legal_answer" with param "query" in the ElevenLabs dashboard, "Wait for response" enabled, and agent prompt must say to USE this tool for legal questions (e.g. "When the user asks a legal question, call get_legal_answer with their question").
+                clientTools: {
+                    get_legal_answer: async ({ query }) => {
+                        const q = typeof query === 'string' ? query : String(query ?? '');
+                        // eslint-disable-next-line no-console
+                        console.log('[voice brain] get_legal_answer called', { query: q });
+                        const threadId = threadIdRef.current;
+                        if (!threadId) return 'No conversation thread. Please try again.';
+                        try {
+                            const { answer } = await voiceThink({
+                                thread_id: threadId,
+                                user_utterance: q,
+                                session_id: null,
+                            });
+                            // eslint-disable-next-line no-console
+                            console.log('[voice brain] got answer', { length: answer?.length, preview: answer?.slice(0, 80) });
+                            return answer;
+                        } catch (err) {
+                            // eslint-disable-next-line no-console
+                            console.error('Voice think error:', err);
+                            return err?.message || 'Sorry, I could not get an answer right now.';
+                        }
+                    },
                 },
             });
 
