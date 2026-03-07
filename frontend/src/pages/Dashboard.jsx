@@ -334,8 +334,8 @@ export default function Dashboard() {
                         </div>
 
                         <div className="flex flex-col md:flex-row gap-6">
-                            <div className="w-full md:w-64 flex flex-col items-center gap-4">
-                                <div className="relative w-40 h-40 md:w-52 md:h-52 flex items-center justify-center">
+                            <div className="w-full md:w-72 flex flex-col items-center gap-4">
+                                <div className="relative w-52 h-52 md:w-64 md:h-64 flex items-center justify-center">
                                     <img
                                         src={
                                             assistantSpeaking
