@@ -154,3 +154,74 @@ async def backboard_get_history(thread_id: str) -> List[Dict[str, Any]]:
     except ValueError as e:
         print(f"Backboard config error: {e}")
         return []
+
+
+async def backboard_find_global_law_context() -> str | None:
+    """
+    Scan Backboard for any LAW_CONTEXT message across threads.
+
+    This lets us treat the scraped Canadian law references as a global
+    cache persisted in Backboard instead of on disk. We only need to
+    find it once per process; the caller will memoize in memory.
+    """
+    # Fast path: user can optionally pin a dedicated law thread
+    law_thread_id = os.environ.get("BACKBOARD_LAW_THREAD_ID")
+    try:
+        async with httpx.AsyncClient() as client:
+            if law_thread_id:
+                try:
+                    res = await client.get(
+                        f"{BACKBOARD_BASE}/threads/{law_thread_id}",
+                        headers=_headers(),
+                        timeout=20,
+                    )
+                    res.raise_for_status()
+                    data = res.json()
+                    messages = data.get("messages", [])
+                    for msg in messages:
+                        content = msg.get("content", "")
+                        if isinstance(content, str) and content.startswith("LAW_CONTEXT:"):
+                            return content[len("LAW_CONTEXT:") :].lstrip()
+                except httpx.HTTPError as e:
+                    print(f"Backboard law thread lookup failed (non-fatal): {e}")
+
+            # Fallback: list all threads and look for any LAW_CONTEXT message
+            try:
+                res = await client.get(
+                    f"{BACKBOARD_BASE}/threads",
+                    headers=_headers(),
+                    timeout=30,
+                )
+                res.raise_for_status()
+                data = res.json()
+                threads = data.get("threads") if isinstance(data, dict) else data
+                if not isinstance(threads, list):
+                    return None
+
+                for t in threads:
+                    if not isinstance(t, dict):
+                        continue
+                    tid = t.get("thread_id")
+                    if not tid:
+                        continue
+                    try:
+                        tres = await client.get(
+                            f"{BACKBOARD_BASE}/threads/{tid}",
+                            headers=_headers(),
+                            timeout=15,
+                        )
+                        tres.raise_for_status()
+                        tdata = tres.json()
+                        messages = tdata.get("messages", [])
+                        for msg in messages:
+                            content = msg.get("content", "")
+                            if isinstance(content, str) and content.startswith("LAW_CONTEXT:"):
+                                return content[len("LAW_CONTEXT:") :].lstrip()
+                    except httpx.HTTPError as e:
+                        print(f"Backboard thread scan failed for {tid} (non-fatal): {e}")
+            except httpx.HTTPError as e:
+                print(f"Backboard list threads failed (non-fatal): {e}")
+    except ValueError as e:
+        print(f"Backboard config error: {e}")
+
+    return None

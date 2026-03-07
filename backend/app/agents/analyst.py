@@ -5,11 +5,14 @@ from typing import Any, Dict, List
 
 import httpx
 
-from .backboard import backboard_save, backboard_get_history
+from .backboard import (
+    backboard_save,
+    backboard_get_history,
+    backboard_find_global_law_context,
+)
 from .llm import analyst_llm, call_llm
 
-
-# Process-wide cache so we only scrape CanLII once per backend instance.
+# Global in-process cache; actual persistence is via Backboard.
 _GLOBAL_LAW_CONTEXT: str | None = None
 
 
@@ -83,34 +86,66 @@ async def scrape_canlii(clause_type: str) -> str:
     return ""
 
 
+def _load_law_context_from_disk() -> str | None:
+    """Load persisted Canadian law context if it exists (scrape once, use forever)."""
+    if not _LAW_CACHE_FILE.is_file():
+        return None
+    try:
+        return _LAW_CACHE_FILE.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        print(f"  -> Law cache file read failed (non-fatal): {e}")
+        return None
+
+
+def _save_law_context_to_disk(context: str) -> None:
+    """Persist law context so we never need to scrape again unless the file is removed."""
+    try:
+        _LAW_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _LAW_CACHE_FILE.write_text(context, encoding="utf-8")
+        print(f"  -> Law context saved to {_LAW_CACHE_FILE} (reused for all future runs).")
+    except Exception as e:
+        print(f"  -> Law cache file write failed (non-fatal): {e}")
+
+
 async def get_live_canadian_law(
     clauses: List[Dict[str, Any]],
     thread_id: str,
 ) -> str:
     """
-    Scrapes CanLII for live law references for each clause type.
-    Falls back to Gemini training knowledge if scraping fails.
+    Canadian law references for clause analysis.
 
-    Results are cached globally in-process so we don't need to scrape
-    per thread or per user. We still mirror the context into Backboard
-    for transparency and debugging.
+    Behavior:
+    - Scrape CanLII at most once ever (per Backboard project).
+    - Persist that context into Backboard as LAW_CONTEXT so all future
+      runs and all users can reuse it by scanning threads.
     """
     global _GLOBAL_LAW_CONTEXT
 
-    # First: global in-process cache, shared across all threads/users.
+    # 1) In-process cache (fast path)
     if _GLOBAL_LAW_CONTEXT:
         return _GLOBAL_LAW_CONTEXT
 
-    # Try to reuse a previously computed law context from Backboard
+    # 2) Check current thread's history (if any) for LAW_CONTEXT
     if thread_id:
         try:
             history = await backboard_get_history(thread_id)
             for msg in reversed(history):
                 content = msg.get("content", "")
-                if content.startswith("LAW_CONTEXT:"):
-                    return content[len("LAW_CONTEXT:") :].lstrip()
+                if isinstance(content, str) and content.startswith("LAW_CONTEXT:"):
+                    cached = content[len("LAW_CONTEXT:") :].lstrip()
+                    _GLOBAL_LAW_CONTEXT = cached
+                    return cached
         except Exception as e:
-            print(f"  -> Backboard law context lookup failed: {e}")
+            print(f"  -> Backboard law context lookup (thread) failed: {e}")
+
+    # 3) Global Backboard scan: any LAW_CONTEXT across assistant threads
+    try:
+        global_ctx = await backboard_find_global_law_context()
+        if global_ctx:
+            _GLOBAL_LAW_CONTEXT = global_ctx
+            return global_ctx
+    except Exception as e:
+        print(f"  -> Backboard global law context scan failed: {e}")
 
     unique_types = list(set(c["type"] for c in clauses))
     live_refs = []
@@ -128,11 +163,8 @@ async def get_live_canadian_law(
             "to analyze these clauses."
         )
 
-    # Cache globally so all threads reuse this without re-scraping
+    # Persist the context into Backboard so future processes can recover it
     _GLOBAL_LAW_CONTEXT = context
-
-    # Also mirror the law context into Backboard for this thread so
-    # history endpoints show which references were used.
     if thread_id:
         try:
             await backboard_save(thread_id, "assistant", f"LAW_CONTEXT: {context}")
