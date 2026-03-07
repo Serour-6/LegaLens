@@ -55,3 +55,31 @@ export async function getDocumentUrl(path: string) {
   if (!res.ok) throw new Error(data.detail || "Failed to get document URL");
   return data as { url: string };
 }
+
+type VoiceSessionResponse = {
+  agent_id: string;
+  webrtc_token: string;
+  connection_type: string;
+};
+
+export async function createVoiceSession(): Promise<VoiceSessionResponse> {
+  const apiKey = import.meta.env.VITE_VOICE_AGENT_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("VITE_VOICE_AGENT_API_KEY is not configured in the frontend.");
+  }
+
+  const res = await apiFetch("/voice/session", {
+    method: "POST",
+    headers: {
+      "X-API-Key": apiKey,
+    },
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || "Failed to create voice session");
+  }
+
+  return data as VoiceSessionResponse;
+}

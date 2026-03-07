@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { DocumentTextIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { Conversation } from '@elevenlabs/client';
 import Layout from '../components/Layout';
-import { listDocuments, getDocumentUrl } from '../api.ts';
+import { listDocuments, getDocumentUrl, createVoiceSession } from '../api.ts';
 
 function formatBytes(bytes) {
     if (!bytes) return '—';
@@ -24,12 +25,23 @@ export default function Dashboard() {
     const [consultantSelectedDocId, setConsultantSelectedDocId] = useState('none');
     const [consultantSending, setConsultantSending] = useState(false);
     const [assistantSpeaking, setAssistantSpeaking] = useState(false);
+    const [voiceStatus, setVoiceStatus] = useState('idle');
+    const [voiceError, setVoiceError] = useState('');
+    const voiceConversationRef = useRef(null);
 
     useEffect(() => {
         listDocuments()
             .then((data) => setDocuments(data.files || []))
             .catch((err) => setError(err.message))
             .finally(() => setLoading(false));
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (voiceConversationRef.current) {
+                voiceConversationRef.current.endSession().catch(() => {});
+            }
+        };
     }, []);
 
     const filtered = documents.filter((doc) =>
@@ -99,6 +111,58 @@ export default function Dashboard() {
             setConsultantSending(false);
             setAssistantSpeaking(false);
         }, 700);
+    };
+
+    const handleToggleVoice = async () => {
+        if (voiceConversationRef.current) {
+            try {
+                await voiceConversationRef.current.endSession();
+            } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('Failed to end voice session', err);
+            } finally {
+                voiceConversationRef.current = null;
+                setVoiceStatus('idle');
+                setAssistantSpeaking(false);
+            }
+            return;
+        }
+
+        try {
+            setVoiceError('');
+            setVoiceStatus('connecting');
+
+            const session = await createVoiceSession();
+
+            const conversation = await Conversation.startSession({
+                agentId: session.agent_id,
+                conversationToken: session.webrtc_token,
+                connectionType: session.connection_type || 'webrtc',
+                onStatusChange: (status) => {
+                    setVoiceStatus(status);
+                },
+                onModeChange: (mode) => {
+                    setAssistantSpeaking(mode === 'speaking');
+                },
+                onError: (error) => {
+                    const message = error?.message || 'Voice session error';
+                    // eslint-disable-next-line no-console
+                    console.error('ElevenLabs conversation error:', error);
+                    setVoiceError(message);
+                    setVoiceStatus('error');
+                    voiceConversationRef.current = null;
+                    setAssistantSpeaking(false);
+                },
+            });
+
+            voiceConversationRef.current = conversation;
+        } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('Failed to start voice session', err);
+            setVoiceError(err.message || 'Failed to start voice session');
+            setVoiceStatus('idle');
+            setAssistantSpeaking(false);
+        }
     };
 
     return (
@@ -305,9 +369,9 @@ export default function Dashboard() {
                         <div className="flex flex-col md:flex-row gap-6 mb-6">
                             <div className="flex-1 text-sm text-[#604B42]">
                                 <p>
-                                    This is a front‑end prototype. Messages stay on this page only and
-                                    are not sent to a real model yet, but the layout is ready for an AI
-                                    backend.
+                                    Text chat on this page is still a front‑end prototype. Messages stay
+                                    on this page only, but the voice mode uses a real ElevenLabs agent
+                                    configured on your backend.
                                 </p>
                             </div>
                             <div className="w-full md:w-72">
@@ -347,8 +411,8 @@ export default function Dashboard() {
                                     />
                                 </div>
                                 <p className="text-xs text-center text-[#604B42] max-w-xs">
-                                    Coming soon: speak naturally to this lawyer using real voice via
-                                    ElevenLabs, or type your question into the chat on the right.
+                                    Speak naturally to this lawyer using real voice via ElevenLabs, or
+                                    type your question into the chat on the right.
                                 </p>
                             </div>
 
@@ -402,16 +466,34 @@ export default function Dashboard() {
                                 <div className="flex flex-col sm:flex-row gap-3 items-stretch">
                                     <button
                                         type="button"
-                                        disabled
-                                        className="sm:w-56 px-4 py-2 rounded-xl text-xs font-semibold bg-[#17282E] text-[#EBE6E3] shadow-sm border border-[#17282E]/60 opacity-70 cursor-not-allowed"
+                                        onClick={handleToggleVoice}
+                                        disabled={voiceStatus === 'connecting'}
+                                        className={`sm:w-56 px-4 py-2 rounded-xl text-xs font-semibold bg-[#17282E] text-[#EBE6E3] shadow-sm border border-[#17282E]/60 ${
+                                            voiceStatus === 'connecting' ? 'opacity-60 cursor-wait' : ''
+                                        }`}
                                     >
-                                        Talk to your lawyer (voice placeholder)
+                                        {voiceConversationRef.current
+                                            ? 'End voice conversation'
+                                            : voiceStatus === 'connecting'
+                                                ? 'Starting…'
+                                                : 'Talk to your lawyer'}
                                     </button>
-                                    <p className="flex-1 text-[11px] text-[#604B42]/90">
-                                        In the full version, this button will start a real‑time voice
-                                        conversation powered by ElevenLabs while the avatar animates as
-                                        it speaks. For now, use the text box below.
-                                    </p>
+                                    <div className="flex-1 text-[11px] text-[#604B42]/90 space-y-1">
+                                        <p>
+                                            Start a real‑time voice conversation powered by ElevenLabs while
+                                            the avatar animates as it speaks. When prompted, allow your
+                                            browser to access the microphone.
+                                        </p>
+                                        <p className="text-[10px]">
+                                            Status: {voiceStatus === 'idle' ? 'idle' : voiceStatus}
+                                            {assistantSpeaking ? ' · speaking' : ''}
+                                        </p>
+                                        {voiceError && (
+                                            <p className="text-[10px] text-red-600">
+                                                {voiceError}
+                                            </p>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <form onSubmit={handleConsultantSend} className="flex gap-3 mt-3">
