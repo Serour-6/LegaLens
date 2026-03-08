@@ -34,6 +34,7 @@ from app.agents.negotiate import run_negotiator
 from app.agents.summarizer import run_qa, run_summarizer
 from app.agents.validator import run_validator
 from app.db.analyses import save_analysis
+from app.db.negotiated_clauses import save_negotiated_clauses
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -228,6 +229,14 @@ async def negotiate(session_id: str):
         result["document_type"],
         thread_id,
     )
+
+    # Persist negotiated clauses when this session is tied to a stored document
+    doc = document_store.get(session_id)
+    if doc and doc.get("document_id") and negotiations:
+        try:
+            save_negotiated_clauses(doc["document_id"], negotiations)
+        except Exception as e:
+            print("[Negotiate] Failed to save negotiated clauses to DB:", e)
 
     return {
         "session_id": session_id,
