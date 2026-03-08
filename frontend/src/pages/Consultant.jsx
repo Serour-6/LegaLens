@@ -210,12 +210,14 @@ export default function ConsultantPage() {
                 }
             }
         };
-        recognition.onerror = () => {
-            setVoiceError('Hotword listener error.');
+        recognition.onerror = (event) => {
+            const err = event?.error || '';
+            if (err === 'no-speech' || err === 'aborted') return;
+            setVoiceError(`Hotword listener error: ${err || 'unknown'}`);
             setHotwordListening(false);
         };
         recognition.onend = () => {
-            if (hotwordListening) {
+            if (hotwordListening && hotwordRecognizerRef.current === recognition) {
                 try { recognition.start(); } catch (_e) { /* ignore */ }
             }
         };

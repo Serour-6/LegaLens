@@ -32,7 +32,7 @@ export function AppProvider({ children }) {
     const [assistantSpeaking, setAssistantSpeaking] = useState(false);
     const [voiceStatus, setVoiceStatus] = useState('idle');
     const [voiceError, setVoiceError] = useState('');
-    const [hotwordListening, setHotwordListening] = useState(true);
+    const [hotwordListening, setHotwordListening] = useState(false);
 
     const voiceConversationRef = useRef(null);
     const voiceBackboardThreadIdRef = useRef(null);
