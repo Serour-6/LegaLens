@@ -1,4 +1,17 @@
 import uuid
+
+from app.cache.redis_cache import (
+    TTL_DOCUMENTS_LIST,
+    TTL_DOCUMENT_PATH,
+    TTL_SIGNED_URL_MAX,
+    get_cached,
+    invalidate_document_path,
+    invalidate_documents_list,
+    invalidate_signed_url,
+    key_document_path,
+    key_documents_list,
+    key_signed_url,
+)
 from app.db.client import supabase
 
 BUCKET_NAME = "legal documents"
@@ -37,6 +50,7 @@ def upload_pdf(file_bytes: bytes, original_filename: str, user_id: str) -> dict:
         "size_bytes": len(file_bytes),
     }).execute()
 
+    invalidate_documents_list(user_id)
     return {"bucket": BUCKET_NAME, "path": storage_path}
 
 
@@ -50,6 +64,15 @@ def list_files(user_id: str) -> list[dict]:
         .execute()
     )
     return result.data or []
+
+
+def list_files_cached(user_id: str) -> list[dict]:
+    """List all documents for a user, with Redis cache."""
+    return get_cached(
+        key_documents_list(user_id),
+        lambda: list_files(user_id),
+        TTL_DOCUMENTS_LIST,
+    )
 
 
 def get_document_by_path(path: str, user_id: str) -> dict | None:
@@ -66,6 +89,15 @@ def get_document_by_path(path: str, user_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def get_document_by_path_cached(path: str, user_id: str) -> dict | None:
+    """Return document row by path and user, with Redis cache."""
+    return get_cached(
+        key_document_path(path, user_id),
+        lambda: get_document_by_path(path, user_id),
+        TTL_DOCUMENT_PATH,
+    )
+
+
 def download_file(path: str) -> bytes:
     """Download file bytes from storage. Caller must verify ownership first."""
     data = supabase.storage.from_(BUCKET_NAME).download(path)
@@ -78,7 +110,20 @@ def get_signed_url(path: str, expires_in: int = 3600) -> str:
     return res["signedURL"]
 
 
-def delete_file(path: str) -> None:
-    """Delete a file from the bucket and its database record."""
+def get_signed_url_cached(path: str, expires_in: int = 3600) -> str:
+    """Generate a signed URL with Redis cache. TTL is min(expires_in, 1 hour)."""
+    ttl = min(expires_in, TTL_SIGNED_URL_MAX)
+    return get_cached(
+        key_signed_url(path),
+        lambda: get_signed_url(path, expires_in),
+        ttl,
+    )
+
+
+def delete_file(path: str, user_id: str) -> None:
+    """Delete a file from the bucket and its database record. user_id used for cache invalidation."""
     supabase.storage.from_(BUCKET_NAME).remove([path])
     supabase.table("documents").delete().eq("bucket_path", path).execute()
+    invalidate_documents_list(user_id)
+    invalidate_document_path(path, user_id)
+    invalidate_signed_url(path)

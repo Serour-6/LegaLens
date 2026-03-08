@@ -4,7 +4,6 @@
 # 1. A rewritten version of the clause that's fair and reasonable
 # 2. A negotiation script — what to actually say to the other party
 # 3. A ranked list of what to fight for vs what to let go
-# Uses its own Gemini key so it never touches the other agents' quotas.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import asyncio
@@ -23,7 +22,7 @@ def negotiator_llm():
         model="gemini-2.5-flash",
         temperature=0.4,   # slightly higher — negotiation language needs to feel natural
         max_tokens=8192,
-        google_api_key=os.environ["GEMINI_KEY_NEGOTIATOR"],
+        google_api_key=os.environ["GEMINI_API_KEY"],
     )
 
 

@@ -4,8 +4,15 @@ import uuid
 from fastapi import APIRouter, UploadFile, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 
-from app.db.storage import upload_pdf, list_files, get_signed_url, delete_file, get_document_by_path, download_file
-from app.db.analyses import get_analysis_by_document_id, result_from_analysis_row
+from app.db.storage import (
+    upload_pdf,
+    list_files_cached,
+    get_signed_url_cached,
+    delete_file,
+    get_document_by_path_cached,
+    download_file,
+)
+from app.db.analyses import get_analysis_by_document_id_cached, result_from_analysis_row
 from app.auth.dependencies import get_current_user
 from app.services.pdf_parser import extract_text_from_pdf
 from app.agents.router import (
@@ -33,13 +40,13 @@ async def upload_document(file: UploadFile, user: dict = Depends(get_current_use
 
 @router.get("/")
 async def list_documents(user: dict = Depends(get_current_user)):
-    files = list_files(user["user_id"])
+    files = list_files_cached(user["user_id"])
     return {"files": files}
 
 
 @router.get("/url")
 async def get_document_url(path: str, user: dict = Depends(get_current_user)):
-    url = get_signed_url(path)
+    url = get_signed_url_cached(path)
     return {"url": url}
 
 
@@ -64,12 +71,12 @@ async def analyze_document(
     if not path or not isinstance(path, str):
         raise HTTPException(status_code=400, detail="Missing or invalid 'path' in body.")
 
-    doc = get_document_by_path(path, user["user_id"])
+    doc = get_document_by_path_cached(path, user["user_id"])
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found or access denied.")
 
     document_id = doc.get("id")
-    cached = get_analysis_by_document_id(document_id) if document_id else None
+    cached = get_analysis_by_document_id_cached(document_id) if document_id else None
     if cached:
         session_id = str(uuid.uuid4())
         result = {
@@ -116,5 +123,5 @@ async def analyze_document(
 
 @router.delete("/")
 async def delete_document(path: str, user: dict = Depends(get_current_user)):
-    delete_file(path)
+    delete_file(path, user["user_id"])
     return {"message": "File deleted successfully"}

@@ -1,5 +1,11 @@
 """Persist and retrieve negotiated clauses (output of the negotiate agent)."""
 
+from app.cache.redis_cache import (
+    TTL_NEGOTIATED_CLAUSES,
+    get_cached,
+    invalidate_negotiated_clauses,
+    key_negotiated_clauses,
+)
 from app.db.client import supabase
 
 TABLE = "negotiated_clauses"
@@ -35,6 +41,7 @@ def save_negotiated_clauses(document_id: str, clauses: list[dict]) -> list[dict]
         .upsert(rows, on_conflict="document_id,clause_id")
         .execute()
     )
+    invalidate_negotiated_clauses(document_id)
     return r.data or []
 
 
@@ -63,3 +70,12 @@ def get_negotiated_clauses(document_id: str) -> list[dict]:
         }
         for row in data
     ]
+
+
+def get_negotiated_clauses_cached(document_id: str) -> list[dict]:
+    """Return negotiated clauses for a document with Redis cache."""
+    return get_cached(
+        key_negotiated_clauses(document_id),
+        lambda: get_negotiated_clauses(document_id),
+        TTL_NEGOTIATED_CLAUSES,
+    )

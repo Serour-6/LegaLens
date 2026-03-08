@@ -1,5 +1,11 @@
 """Persist and retrieve document analysis results (post-pipeline)."""
 
+from app.cache.redis_cache import (
+    TTL_ANALYSIS,
+    get_cached,
+    invalidate_analysis,
+    key_analysis,
+)
 from app.db.client import supabase
 
 TABLE = "document_analyses"
@@ -27,6 +33,7 @@ def save_analysis(document_id: str, result: dict) -> dict:
         .upsert(row, on_conflict="document_id")
         .execute()
     )
+    invalidate_analysis(document_id)
     return r.data[0] if r.data else {}
 
 
@@ -41,6 +48,15 @@ def get_analysis_by_document_id(document_id: str) -> dict | None:
     )
     rows = r.data or []
     return rows[0] if rows else None
+
+
+def get_analysis_by_document_id_cached(document_id: str) -> dict | None:
+    """Return analysis for a document with Redis cache."""
+    return get_cached(
+        key_analysis(document_id),
+        lambda: get_analysis_by_document_id(document_id),
+        TTL_ANALYSIS,
+    )
 
 
 def result_from_analysis_row(row: dict) -> dict:
