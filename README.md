@@ -8,7 +8,7 @@ LegaLens is an AI-powered legal document assistant. Upload contracts (PDF or DOC
 
 [Devpost](https://devpost.com/software/legalens)
 
-Created at HackCanada 2026
+Hack Canada 2026 Winner 🏆
 
 ## Tech stack
 
